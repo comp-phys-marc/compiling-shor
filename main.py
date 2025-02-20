@@ -2,6 +2,7 @@
 Compiling Shor's Algorithm.
 
 @Author: Marcus Edwards
+@Date: 2025-02-20
 '''
 
 import random
@@ -109,6 +110,13 @@ def shor(N):
 
 
 def get_matrix_a_mod_N(l, N):
+    """
+    Synthesizes the U_{N,a} operator's matrix in terms of CNOTs.
+
+    :param l: the integer coprime to N which we are finding the period of.
+    :param N: the modulus being factored.
+    :return: The matrix U_{N,a}.
+    """
     pass
 
 
@@ -253,8 +261,26 @@ def builtin_qpe(eigenvalue):
 
 
 def get_period(U, N):
+    """
+    Computes the minimum r such that U^r |1> = |1>.
+    :param U: The unitary that encodes the function a^m (mod N).
+    :param N: The modulus, or public key, N.
+    :return: The period.
+    """
     pass
 
+
+# Part 4. Convert to Clifford + T.
+
+
+def convert_to_clifford_T(tape, epsilon):
+    """
+    Converts the provided circuit to a Clifford + T circuit with max allowed error epsilon.
+    :param tape: The qnode to compile to Clifford + T.
+    :param epsilon: The maximum allowed error epsilon.
+    :return: The compiled circuit.
+    """
+    pass
 
 if __name__ == '__main__':
     for val in qft_3():
@@ -275,4 +301,6 @@ if __name__ == '__main__':
     assert results_to_eigenvalue(qpe('1')) == (-0.7071067811865477 - 0.7071067811865475j)
     print('lambda_1:' + str(results_to_eigenvalue(qpe('1'))))
 
-    print('works!')
+    # convert to Clifford + T circuit
+    print(qml.clifford_t_decomposition(qpe('0'), 10**-7))
+    print(convert_to_clifford_T(qpe('0'), 10**-7))

@@ -6,6 +6,7 @@ Compiling Shor's Algorithm.
 '''
 
 import random
+import numpy as np
 import pennylane as qml
 from pennylane import numpy as np
 
@@ -118,6 +119,74 @@ def get_matrix_a_mod_N(l, N):
     :return: The matrix U_{N,a}.
     """
     pass
+
+
+def CNOT_synth(A, n, m):
+    """
+    Performs the CNOT circuit synthesis using the efficient approach in
+    [1] K. N. Patel, I. L. Markov, and J. P. Hayes, “Efficient Synthesis
+    of Linear Reversible Circuits,” Feb. 03, 2003, arXiv: arXiv:quant-ph/0302002.
+    doi: 10.48550/arXiv.quant-ph/0302002.
+
+    :param A: The initial matrix to row-reduce.
+    :param n: The dimension of the square matrix.
+    :param m: The size of the partitions of the square matrix.
+    :return: The circuit.
+    """
+    # synthesize upper and lower triangular parts
+    [A, circuit_lower] = lwr_CNOT_synth(A, n, m)
+    A = np.transpose(A)
+    [A, circuit_upper] = lwr_CNOT_synth(A, n, m)
+
+    # switch control / target of CNOT in upper part.
+    for i in range(len(circuit_upper)):
+        temp = circuit_upper[i][1]
+        circuit_upper[i][1] = circuit_lower[i][0]
+        circuit_lower[i][0] = temp
+
+    # combine upper, lower parts and
+    circuit = circuit_upper + circuit_lower
+
+
+def lwr_CNOT_synth(A, n, m):
+    """
+    Helper function for the efficient CNOT circuit synthesis which synthesizes
+    the lower triangular part.
+
+    :param A: The square matrix to row-reduce.
+    :param n: The size of the matrix.
+    :param m: The size of the partitions of the square matrix.
+    :return: The row-reduced matrix and the circuit.
+    """
+    circuit = []
+    for sec in range(1, np.ceil(n/m)):  # iterate over column sections
+        patt = dict()
+        # remove duplicate qub-rows in section
+        for i in range(2**m):
+            patt[i] = -1
+        for row_ind in range((sec-1)*m, n):
+            sub_row_patt = A[row_ind, (sec-1)*m : sec*m-1]  # TODO: what is this line supposed to index?
+            if patt[sub_row_patt] == -1:
+                patt[sub_row_patt] = row_ind
+            else:
+                A[row_ind, :] += A[patt[sub_row_patt], :]
+                circuit = [(patt[sub_row_patt], row_ind)] + circuit
+
+        # use Gaussian elimination for remaining entries in column section
+        for col_ind in range((sec-1)*m, sec*m-1):
+            # check for 1 on diagonal
+            diag_one = (A[col_ind, col_ind] == 0)
+            # remove ones in rows below col_ind
+            for row_ind in range(col_ind+1, n):
+                if A[row_ind, col_ind] == 1:
+                    if not diag_one:
+                        A[col_ind, :] += A[row_ind, :]
+                        circuit = [(row_ind, col_ind)] + circuit
+                        diag_one = 1
+                    A[row_ind, :] += A[col_ind, :]
+                    circuit = [(col_ind, row_ind)] + circuit
+
+        return [A, circuit]
 
 
 # Part 3. Phase estimation.
@@ -281,6 +350,7 @@ def convert_to_clifford_T(tape, epsilon):
     :return: The compiled circuit.
     """
     pass
+
 
 if __name__ == '__main__':
     for val in qft_3():

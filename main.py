@@ -9,6 +9,7 @@ import random
 import numpy as np
 import pennylane as qml
 from pennylane import numpy as np
+from functools import partial
 
 
 dev = qml.device('default.qubit', wires=3, shots=None)
@@ -93,7 +94,7 @@ def shor(N):
         p = get_gcd(l, N)
         q = N / p
     else:
-        U = get_matrix_a_mod_N(l, N)
+        U = get_matrix_l_mod_N(l, N)
         r = get_period(U, N)
         if is_odd(r):
             [p, q] = shor(N)
@@ -110,15 +111,32 @@ def shor(N):
 # Part 2. Compiling CNOT circuits.
 
 
-def get_matrix_a_mod_N(l, N):
+def get_matrix_l_mod_N(l, N):
     """
-    Synthesizes the U_{N,a} operator's matrix in terms of CNOTs.
+    Synthesizes the U_{N,l} operator's matrix in terms of CNOTs.
 
     :param l: the integer coprime to N which we are finding the period of.
     :param N: the modulus being factored.
-    :return: The matrix U_{N,a}.
+    :return: The matrix U_{N,l}.
     """
-    pass
+    truth_table = {}
+    num_qubits = 3
+
+    for x in range(2**num_qubits):
+        truth_table[bin(x).split('b')[1]] = bin((l**x) % N).split('b')[1]
+
+    U = []
+
+    for op_row in range(num_qubits):
+        b = []
+        a = []
+        for input in truth_table.keys():
+            b.append(int(truth_table[input][op_row]))
+            a.append([int(input[input_entry]) for input_entry in range(num_qubits)])
+        row = np.linalg.solve(np.array(a), np.array(b))
+        U.append(row)
+
+    return partial(CNOT_synth, A=np.array(U), n=len(row), m=len(row)//2)
 
 
 def CNOT_synth(A, n, m):
@@ -144,8 +162,12 @@ def CNOT_synth(A, n, m):
         circuit_upper[i][1] = circuit_lower[i][0]
         circuit_lower[i][0] = temp
 
-    # combine upper, lower parts and
+    # combine upper, lower parts
     circuit = circuit_upper + circuit_lower
+
+    # convert to pennylane circuit
+    for j in range(len(circuit)):
+        qml.CNOT(circuit[j])
 
 
 def lwr_CNOT_synth(A, n, m):
@@ -165,7 +187,7 @@ def lwr_CNOT_synth(A, n, m):
         for i in range(2**m):
             patt[i] = -1
         for row_ind in range((sec-1)*m, n):
-            sub_row_patt = A[row_ind, (sec-1)*m : sec*m-1]  # TODO: what is this line supposed to index?
+            sub_row_patt = A[row_ind, (sec-1)*m: sec*m-1]
             if patt[sub_row_patt] == -1:
                 patt[sub_row_patt] = row_ind
             else:
@@ -332,7 +354,7 @@ def builtin_qpe(eigenvalue):
 def get_period(U, N):
     """
     Computes the minimum r such that U^r |1> = |1>.
-    :param U: The unitary that encodes the function a^m (mod N).
+    :param U: The unitary that encodes the function l^x (mod N).
     :param N: The modulus, or public key, N.
     :return: The period.
     """

@@ -12,6 +12,10 @@ from pennylane import numpy as np
 from functools import partial
 
 
+INPUT_QUBITS = 10
+OUTPUT_QUBITS = 5
+
+
 dev = qml.device('default.qubit', wires=3, shots=None)
 
 
@@ -79,23 +83,27 @@ def is_not_one(x, N):
     return x % N != N - 1 and x % N != 1
 
 
-def shor(N):
+def shor(N, l=None, e=10**-17):
     """Return the factorization of a given integer.
 
     Args:
        N (int): integer we want to factorize.
+       l (int): Optional choice of integer coprime to N.
+       e (float): Optional error which the circuit is compiled to.
 
     Returns:
         array[int]: [p,q], the prime factors of N.
     """
 
-    l = random.randint(2, N - 2)
+    if l is None:
+        l = random.randint(2, N - 2)
     if not is_coprime(l, N):
         p = get_gcd(l, N)
         q = N / p
     else:
-        U = get_matrix_l_mod_N(l, N)
-        r = get_period(U, N)
+        Us = get_matrix_l_mod_N(l, N)
+        U = make_exponentiation_matrix_controlled(Us)
+        r = get_period(U, e)
         if is_odd(r):
             [p, q] = shor(N)
         else:
@@ -111,6 +119,21 @@ def shor(N):
 # Part 2. Compiling CNOT circuits.
 
 
+def make_exponentiation_matrix_controlled(Us):
+    """
+    Injects the control parameter into the modular exponentation circuits.
+    :param Us: The modular exponentation circuits.
+    :return: A function that calls all the controlled exponentation circuits.
+    """
+    def modular_exponentiation_matrix_controlled():
+        index = 0
+        for U in Us:
+            U(c=INPUT_QUBITS - index - 1)
+            index += 1
+
+    return modular_exponentiation_matrix_controlled
+
+
 def get_matrix_l_mod_N(l, N):
     """
     Synthesizes the U_{N,l} operator's matrix in terms of CNOTs.
@@ -119,27 +142,44 @@ def get_matrix_l_mod_N(l, N):
     :param N: the modulus being factored.
     :return: The matrix U_{N,l}.
     """
-    truth_table = {}
     num_qubits = 3
+    i = 0
+    unitaries = []
+    while i < 2*num_qubits - 1:
+        unitary = get_controlled_modular_multiplication_unitary(l, N, i)
+        unitaries.append(unitary)
+        i += 1
+    return unitaries
 
-    for x in range(2**num_qubits):
-        truth_table[bin(x).split('b')[1]] = bin((l**x) % N).split('b')[1]
+
+def get_controlled_modular_multiplication_unitary(l, N, i):
+    """
+    Returns an in-place controlled modular multiplication unitary for power i.
+    :param l: The integer coprime to N.
+    :param N: The secret N.
+    :param i: The power of l.
+    :return:
+    """
+    truth_table = {}
+
+    for x in range(2**OUTPUT_QUBITS):
+        truth_table[format(x, '#07b').split('b')[1]] = format((x*(l**(2**i)) % N), '#07b').split('b')[1]
 
     U = []
 
-    for op_row in range(num_qubits):
+    for op_row in range(OUTPUT_QUBITS):
         b = []
         a = []
         for input in truth_table.keys():
             b.append(int(truth_table[input][op_row]))
-            a.append([int(input[input_entry]) for input_entry in range(num_qubits)])
-        row = np.linalg.solve(np.array(a), np.array(b))
+            a.append([int(input[input_entry]) for input_entry in range(OUTPUT_QUBITS)])
+        row = np.linalg.lstsq(np.array(a), np.array(b))
         U.append(row)
 
-    return partial(CNOT_synth, A=np.array(U), n=len(row), m=len(row)//2)
+    return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
 
 
-def CNOT_synth(A, n, m):
+def CNOT_synth(A, n, m, c):
     """
     Performs the CNOT circuit synthesis using the efficient approach in
     [1] K. N. Patel, I. L. Markov, and J. P. Hayes, “Efficient Synthesis
@@ -149,6 +189,7 @@ def CNOT_synth(A, n, m):
     :param A: The initial matrix to row-reduce.
     :param n: The dimension of the square matrix.
     :param m: The size of the partitions of the square matrix.
+    :param c: The qubit that controls this operation.
     :return: The circuit.
     """
     # synthesize upper and lower triangular parts
@@ -167,7 +208,7 @@ def CNOT_synth(A, n, m):
 
     # convert to pennylane circuit
     for j in range(len(circuit)):
-        qml.CNOT(circuit[j])
+        qml.MultiControlledX((c, *circuit[j]))
 
 
 def lwr_CNOT_synth(A, n, m):
@@ -181,9 +222,9 @@ def lwr_CNOT_synth(A, n, m):
     :return: The row-reduced matrix and the circuit.
     """
     circuit = []
-    for sec in range(1, np.ceil(n/m)):  # iterate over column sections
+    for sec in range(1, int(np.ceil(n/m))):  # iterate over column sections
         patt = dict()
-        # remove duplicate qub-rows in section
+        # remove duplicate sub-rows in section
         for i in range(2**m):
             patt[i] = -1
         for row_ind in range((sec-1)*m, n):
@@ -211,188 +252,67 @@ def lwr_CNOT_synth(A, n, m):
         return [A, circuit]
 
 
-# Part 3. Phase estimation.
+shor_machine = qml.device('default.qubit', wires=6, shots=None)
 
 
-def fractional_binary_to_float(s):
-    """ Helper function to expand fractional binary numbers as floats.
-
-    :param s (string): A string in the form "0.xxxx" where the x are 0s and 1s.
-    :return: The numerical value when converted from fractional binary to float.
+def get_period(U, e):
     """
-
-    assert '.' == s[1]
-    assert s[0] == '0'
-
-    for bit in s[2:]:
-        assert bit in ('0', '1')
-
-    bin = s.split('.')[-1]
-
-    power_of_two = -1
-    sum = 0
-    for bit in bin:
-        if bit == '1':
-            sum += 2 ** power_of_two
-        power_of_two -= 1
-
-    return sum
-
-
-def float_to_fractional_binary(x, max_bits=10):
-    """ Helper function to turn a string to a binary representation.
-
-    :param x (float): A numerical value between 0 < x < 1 with a decimal point.
-    :param max_bits (int): The maximum number of bits in the expansion. For x that require
-        fewer than max_bits for the expansion, terminate immediately.
-    :return: A string that is the fractional binary representation, formatted as '0.bbbb'
-        where there are max_bits b.
+    Calls the quantum subroutine and calculates the period r from the measurement outcome histogram.
+    :param U: The modular exponentiation operator.
+    :param N: The number to factor.
+    :return: The period r.
     """
+    # measure y_m = m (2^3 / r) with high probability
+    probs = shor_circuit(U)
 
-    assert isinstance(x, float)
-    assert 0 < x < 1
+    # draw Clifford + T circuit for error e
+    qml.draw(qml.clifford_t_decomposition(shor_circuit(U), e))
 
-    s = '0.' + ''.join(['0' for i in range(max_bits)])
+    # Calculate the period
+    ys = []
+    index = 0
 
-    index = 1
-    while index < max_bits:
-        if (2 ** (-1 * index)) <= (x - fractional_binary_to_float(s)):
-            s = s[0: 2 + index] + '1' + s[2 + index + 1:]
+    for prob in probs:
+        if not np.isclose(prob, 0.):
+            ys.append(index)
         index += 1
 
-    return s
+    rs = list(map(lambda m_y: (2**3 / (m_y[1] / m_y[0])), enumerate(ys)))
+
+    for r in rs:
+        assert np.isclose(r, np.sum(rs) / len(rs))
+
+    return r
 
 
-def results_to_eigenvalue(results):
-    """ Converts from the QPE probability histogram output to computed eigenvalue.
-
-    :param results: The results from the QPE algorithm.
-    :return: The eigenvalue computed.
-    """
-
-    for i, result in enumerate(results):
-        if np.isclose(result, 1):
-            break
-
-    print(f"0.{str(bin(i)).split('b')[-1]}")
-    flt = fractional_binary_to_float(f"0.{str(bin(i)).split('b')[-1]}")
-    eigenvalue = complex(np.cos(2 * np.pi * flt), np.sin(2 * np.pi * flt))
-
-    return eigenvalue
-
-
-@qml.qnode(dev)
-def qft_3():
-
-    qml.Hadamard(wires=[0])
-    qml.ControlledQubitUnitary(np.array([[1, 0], [0, 0-1j]]), control_wires=[1], wires=[0])  # Controlled-S gate
-    qml.ControlledQubitUnitary(np.array([[1, 0], [0, complex(np.cos(np.pi / 4), -np.sin(np.pi / 4))]]), control_wires=[2], wires=[0])  # Controlled-T gate
-    qml.Hadamard(wires=[1])
-    qml.ControlledQubitUnitary(np.array([[1, 0], [0, 0 - 1j]]), control_wires=[2], wires=[1])  # Controlled-S gate
-    qml.Hadamard(wires=[2])
-    qml.SWAP(wires=[0, 2])
-
-    return qml.probs(wires=[0, 1, 2])
-
-
-@qml.qnode(dev)
-def builtin_qft3():
-    qml.QFT(wires=[0, 1, 2])
-
-    return qml.probs(wires=[0, 1, 2])
-
-
-dev2 = qml.device('default.qubit', wires=4, shots=None)
-
-
-@qml.qnode(dev2)
-def qpe(eigenvector):
-    """ Quantum phase estimation on a single-qubit unitary with 3-bit precision.
-
-    :return: The probability pf each of the basis states from qml.probs.
-    """
-
-    assert eigenvector in ('0', '1')
-
-    qml.Hadamard(0)
-    qml.Hadamard(1)
-    qml.Hadamard(2)
-
-    # Initialize state in the eigenvector
-
-    # The U in question has two eigenvectors: (1, 0) we denote |0> and (0, 1) we denote |1>
-    if eigenvector == '1':
-        qml.PauliX(3)
-
-    # Perform controlled unitaries
-    U = qml.QubitUnitary(np.array([[1, 0],
-        [0, complex(np.cos(5*np.pi/4), np.sin(5*np.pi/4))]]), wires=[3])
-
-    qml.ctrl(qml.pow(U, 2 ** 0), 2)
-    qml.ctrl(qml.pow(U, 2 ** 1), 1)
-    qml.ctrl(qml.pow(U, 2 ** 2), 0)
-
-    # Now do the QFT backwards on the first three qubits
-    qml.adjoint(qml.QFT(wires=[0, 1, 2]))
-
-    return qml.probs(wires=[0, 1, 2])
-
-
-@qml.qnode(dev2)
-def builtin_qpe(eigenvalue):
-    if eigenvalue == '1':
-        qml.PauliX(3)
-
-    U = qml.QubitUnitary(np.array([[1, 0],
-                                   [0, complex(np.cos(5 * np.pi / 4), np.sin(5 * np.pi / 4))]]), wires=[3]).matrix()
-
-    qml.QuantumPhaseEstimation(U, 3, [0, 1, 2])
-
-    return qml.probs(wires=[0, 1, 2])
-
-
-def get_period(U, N):
+@qml.qnode(shor_machine)
+def shor_circuit(U):
     """
     Computes the minimum r such that U^r |1> = |1>.
     :param U: The unitary that encodes the function l^x (mod N).
     :param N: The modulus, or public key, N.
     :return: The period.
     """
-    pass
 
+    # put input register in superposition
+    qml.Hadamard(0)
+    qml.Hadamard(1)
+    qml.Hadamard(2)
 
-# Part 4. Convert to Clifford + T.
+    # apply modular exponentiation function
+    U()
 
+    # measure output register
+    qml.measure(3)
+    qml.measure(4)
+    qml.measure(5)
 
-def convert_to_clifford_T(tape, epsilon):
-    """
-    Converts the provided circuit to a Clifford + T circuit with max allowed error epsilon.
-    :param tape: The qnode to compile to Clifford + T.
-    :param epsilon: The maximum allowed error epsilon.
-    :return: The compiled circuit.
-    """
-    pass
+    # apply QFT to input register
+    qml.QFT(wires=[0, 1, 2, 3, 4])
+
+    # measure input register
+    return qml.probs(wires=[0, 1, 2])
 
 
 if __name__ == '__main__':
-    for val in qft_3():
-        assert np.isclose(val, 0.125)  # should be a uniform superposition when acting on |0..0>
-
-    assert np.allclose(qft_3(), builtin_qft3())
-    print(qft_3())
-
-    # test with both eigenvectors of U
-    assert np.allclose(qpe('0'), builtin_qpe('0'))
-    print(qpe('0'))
-    assert np.allclose(qpe('1'), builtin_qpe('1'))
-    print(qpe('1'))
-
-    # should get the right eigenvalues
-    assert results_to_eigenvalue(qpe('0')) == 1
-    print('lambda_0:' + str(results_to_eigenvalue(qpe('0'))))
-    assert results_to_eigenvalue(qpe('1')) == (-0.7071067811865477 - 0.7071067811865475j)
-    print('lambda_1:' + str(results_to_eigenvalue(qpe('1'))))
-
-    # convert to Clifford + T circuit
-    print(qml.clifford_t_decomposition(qpe('0'), 10**-7))
-    print(convert_to_clifford_T(qpe('0'), 10**-7))
+    shor(32, 3, 10**-7)

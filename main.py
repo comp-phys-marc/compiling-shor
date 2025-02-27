@@ -12,6 +12,7 @@ import copy
 import matplotlib.pyplot as plt
 from pennylane import numpy as np
 from functools import partial
+from itertools import product
 
 
 plt.style.use('pennylane.drawer.plot')
@@ -112,7 +113,7 @@ def shor(N, l=None, e=10**-17):
             [p, q] = shor(N)
         else:
             x = (l ** (r / 2)) % N
-            if not is_not_one(x):
+            if not is_not_one(x, N):
                 [p, q] = shor(N)
             else:
                 p = get_gcd(x - 1, N)
@@ -177,7 +178,19 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
         for input in truth_table.keys():
             b.append(int(truth_table[input][op_row]))
             a.append([int(input[input_entry]) for input_entry in range(OUTPUT_QUBITS)])
-        row = np.linalg.lstsq(np.array(a), np.array(b))[0]
+
+        # row = np.linalg.lstsq(np.array(a), np.array(b))[0]
+
+        for m, n, o, p, q in product([1, 0], repeat=OUTPUT_QUBITS):
+            row = [m, n, o, p, q]
+            row_works = True
+            for index, input in enumerate(a):
+                if np.array(row) @ np.array(input).transpose() != b[index]:
+                    row_works = False
+                    break
+            if row_works:
+                break
+
         U.append(row)
 
     return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
@@ -266,7 +279,6 @@ def lwr_CNOT_synth(A, n, m):
             diag_one = (A[col_ind, col_ind] == 1)
             # remove ones in rows below col_ind
             for row_ind in range(col_ind+1, n):
-                # TODO: account for entries that are not 1
                 if A[row_ind, col_ind] != 0:
                     if not diag_one:
                         A[col_ind, :] += A[row_ind, :]
@@ -315,7 +327,7 @@ def get_period(U, e):
     for r in rs:
         assert np.isclose(r, np.sum(rs) / len(rs))
 
-    return rs[0]
+    return np.sum(rs) / len(rs)
 
 
 @partial(qml.transforms.decompose, max_expansion=1)

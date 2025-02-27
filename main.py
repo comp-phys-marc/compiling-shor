@@ -319,7 +319,7 @@ def get_period(U, e):
             ys.append(index)
         index += 1
 
-    rs = list(map(lambda m_y: (2**OUTPUT_QUBITS / (m_y[1] / m_y[0])), enumerate(ys[1:])))
+    rs = list(map(lambda m_y: (2**OUTPUT_QUBITS / (m_y[1] / m_y[0])) if m_y[0] != 0 else 0, enumerate(ys)))
 
     for r in rs:
         assert np.isclose(r, np.sum(rs) / len(rs))
@@ -356,4 +356,5 @@ def shor_circuit(U):
 
 
 if __name__ == '__main__':
-    shor(32, 3, 10**-7)
+    [p, q] = shor(32, 3, 10**-7)
+    print(f"p: {p}, q: {q}")

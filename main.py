@@ -21,9 +21,6 @@ INPUT_QUBITS = 10
 OUTPUT_QUBITS = 5
 
 
-dev = qml.device('default.qubit', wires=3, shots=None)
-
-
 # Part 1. Helper functions
 
 
@@ -162,7 +159,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
     :param l: The integer coprime to N.
     :param N: The secret N.
     :param i: The power of l.
-    :return:
+    :return: a partially initialized function to generate the modular multiplication circuit.
     """
     truth_table = {}
 
@@ -300,7 +297,7 @@ def get_period(U, e):
     :param N: The number to factor.
     :return: The period r.
     """
-    # measure y_m = m (2^3 / r) with high probability
+    # measure y_m = m (2^5 / r) with high probability
     probs = shor_circuit(U)
 
     # compile Clifford + T circuit for error e
@@ -322,7 +319,7 @@ def get_period(U, e):
             ys.append(index)
         index += 1
 
-    rs = list(map(lambda m_y: (2**3 / (m_y[1] / m_y[0])), enumerate(ys[1:])))
+    rs = list(map(lambda m_y: (2**OUTPUT_QUBITS / (m_y[1] / m_y[0])), enumerate(ys[1:])))
 
     for r in rs:
         assert np.isclose(r, np.sum(rs) / len(rs))
@@ -352,7 +349,7 @@ def shor_circuit(U):
         qml.measure(j)
 
     # apply QFT to input register
-    qml.QFT(wires=[k for k in range(INPUT_QUBITS)])
+    qml.adjoint(qml.QFT(wires=[k for k in range(INPUT_QUBITS)]))
 
     # measure input register
     return qml.probs(wires=[k for k in range(INPUT_QUBITS)])

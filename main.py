@@ -8,9 +8,13 @@ Compiling Shor's Algorithm.
 import random
 import numpy as np
 import pennylane as qml
+import copy
+import matplotlib.pyplot as plt
 from pennylane import numpy as np
 from functools import partial
 
+
+plt.style.use('pennylane.drawer.plot')
 
 INPUT_QUBITS = 10
 OUTPUT_QUBITS = 5
@@ -173,7 +177,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
         for input in truth_table.keys():
             b.append(int(truth_table[input][op_row]))
             a.append([int(input[input_entry]) for input_entry in range(OUTPUT_QUBITS)])
-        row = np.linalg.lstsq(np.array(a), np.array(b))
+        row = np.linalg.lstsq(np.array(a), np.array(b))[0]
         U.append(row)
 
     return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
@@ -199,16 +203,39 @@ def CNOT_synth(A, n, m, c):
 
     # switch control / target of CNOT in upper part.
     for i in range(len(circuit_upper)):
-        temp = circuit_upper[i][1]
-        circuit_upper[i][1] = circuit_lower[i][0]
-        circuit_lower[i][0] = temp
+        new = (circuit_upper[i][1], circuit_upper[i][0])
+        circuit_upper[i] = new
 
     # combine upper, lower parts
     circuit = circuit_upper + circuit_lower
 
     # convert to pennylane circuit
     for j in range(len(circuit)):
-        qml.MultiControlledX((c, *circuit[j]))
+        qml.MultiControlledX(wires=(c, circuit[j][0] + INPUT_QUBITS, circuit[j][1] + INPUT_QUBITS),)
+
+
+def hash_pattern(arr, precision=10):
+    """
+    Hashes a sub-row pattern.
+    :param arr: The sub-row pattern.
+    :param precision: The float precision up to which to maintain uniqueness between tensors.
+    :return: The hash.
+    """
+    hash = ''
+    if arr.shape == ():
+        return str(arr)
+    for elem in arr:
+        if not isinstance(elem, np.tensor) and not isinstance(elem, np.ndarray) and not isinstance(elem, list):
+            hash += str(elem).split('.')[0] + '.'
+            if len(str(elem).split('.')) > 1:
+                dec = str(elem).split('.')[1]
+                i = 0
+                while i < len(dec) and i < precision:
+                    hash += dec[i]
+                    i += 1
+        else:
+            hash += hash_pattern(elem, precision)
+    return hash
 
 
 def lwr_CNOT_synth(A, n, m):
@@ -225,23 +252,22 @@ def lwr_CNOT_synth(A, n, m):
     for sec in range(1, int(np.ceil(n/m))):  # iterate over column sections
         patt = dict()
         # remove duplicate sub-rows in section
-        for i in range(2**m):
-            patt[i] = -1
         for row_ind in range((sec-1)*m, n):
-            sub_row_patt = A[row_ind, (sec-1)*m: sec*m-1]
-            if patt[sub_row_patt] == -1:
-                patt[sub_row_patt] = row_ind
+            sub_row_patt = copy.deepcopy(A[row_ind, (sec-1)*m: sec*m-1])
+            if hash_pattern(sub_row_patt) not in patt:
+                patt[hash_pattern(sub_row_patt)] = row_ind
             else:
-                A[row_ind, :] += A[patt[sub_row_patt], :]
-                circuit = [(patt[sub_row_patt], row_ind)] + circuit
+                A[row_ind, :] += A[patt[hash_pattern(sub_row_patt)], :]
+                circuit = [(patt[hash_pattern(sub_row_patt)], row_ind)] + circuit
 
         # use Gaussian elimination for remaining entries in column section
         for col_ind in range((sec-1)*m, sec*m-1):
             # check for 1 on diagonal
-            diag_one = (A[col_ind, col_ind] == 0)
+            diag_one = (A[col_ind, col_ind] == 1)
             # remove ones in rows below col_ind
             for row_ind in range(col_ind+1, n):
-                if A[row_ind, col_ind] == 1:
+                # TODO: account for entries that are not 1
+                if A[row_ind, col_ind] != 0:
                     if not diag_one:
                         A[col_ind, :] += A[row_ind, :]
                         circuit = [(row_ind, col_ind)] + circuit
@@ -252,7 +278,7 @@ def lwr_CNOT_synth(A, n, m):
         return [A, circuit]
 
 
-shor_machine = qml.device('default.qubit', wires=6, shots=None)
+shor_machine = qml.device('default.qubit', wires=INPUT_QUBITS+OUTPUT_QUBITS, shots=None)
 
 
 def get_period(U, e):
@@ -265,8 +291,15 @@ def get_period(U, e):
     # measure y_m = m (2^3 / r) with high probability
     probs = shor_circuit(U)
 
-    # draw Clifford + T circuit for error e
-    qml.draw(qml.clifford_t_decomposition(shor_circuit(U), e))
+    # compile Clifford + T circuit for error e
+    # qml.clifford_t_decomposition(shor_circuit(U), e)
+
+    # draw circuit with QFT expanded
+    print(qml.draw(shor_circuit)(U))
+
+    # draw circuit with matplotlib
+    # qml.draw_mpl(shor_circuit, decimals=2, style="pennylane")(U)
+    # plt.show()
 
     # Calculate the period
     ys = []
@@ -277,14 +310,15 @@ def get_period(U, e):
             ys.append(index)
         index += 1
 
-    rs = list(map(lambda m_y: (2**3 / (m_y[1] / m_y[0])), enumerate(ys)))
+    rs = list(map(lambda m_y: (2**3 / (m_y[1] / m_y[0])), enumerate(ys[1:])))
 
     for r in rs:
         assert np.isclose(r, np.sum(rs) / len(rs))
 
-    return r
+    return rs[0]
 
 
+@partial(qml.transforms.decompose, max_expansion=1)
 @qml.qnode(shor_machine)
 def shor_circuit(U):
     """
@@ -295,23 +329,21 @@ def shor_circuit(U):
     """
 
     # put input register in superposition
-    qml.Hadamard(0)
-    qml.Hadamard(1)
-    qml.Hadamard(2)
+    for i in range(INPUT_QUBITS):
+        qml.Hadamard(i)
 
     # apply modular exponentiation function
     U()
 
     # measure output register
-    qml.measure(3)
-    qml.measure(4)
-    qml.measure(5)
+    for j in range(INPUT_QUBITS, INPUT_QUBITS + OUTPUT_QUBITS):
+        qml.measure(j)
 
     # apply QFT to input register
-    qml.QFT(wires=[0, 1, 2, 3, 4])
+    qml.QFT(wires=[k for k in range(INPUT_QUBITS)])
 
     # measure input register
-    return qml.probs(wires=[0, 1, 2])
+    return qml.probs(wires=[k for k in range(INPUT_QUBITS)])
 
 
 if __name__ == '__main__':

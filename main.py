@@ -149,7 +149,7 @@ def get_matrix_l_mod_N(l, N):
     """
     i = 0
     unitaries = []
-    while i < 2*OUTPUT_QUBITS - 1:
+    while i < 2*OUTPUT_QUBITS:
         unitary = get_controlled_modular_multiplication_unitary(l, N, i)
         unitaries.append(unitary)
         i += 1

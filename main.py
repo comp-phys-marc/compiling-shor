@@ -193,6 +193,34 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
     return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
 
 
+def compileMultiControlledX(wires):
+    """
+    Compile a Toffoli to Clifford+T using the approach in:
+
+    [1] J. Welch, A. Bocharov, and K. Svore, “Efficient Approximation of
+    Diagonal Unitaries over the Clifford+T Basis,” Quantum information & computation,
+    vol. 16, Dec. 2014, doi: 10.26421/QIC16.1-2-6.
+
+    :param wires: The wires the gate acts on, with the target wire last.
+    :return:
+    """
+    qml.T(wires[0])
+    qml.CNOT(wires[0], wires[1])
+    qml.adjoint(qml.T(wires[1]))
+    qml.CNOT(wires[0], wires[1])
+    qml.T(wires[1])
+    qml.H(wires[2])
+    qml.CNOT(wires[1], wires[2])
+    qml.adjoint(qml.T(wires[2]))
+    qml.CNOT(wires[0], wires[2])
+    qml.T(wires[2])
+    qml.CNOT(wires[1], wires[2])
+    qml.adjoint(qml.T(wires[2]))
+    qml.CNOT(wires[0], wires[2])
+    qml.T(wires[2])
+    qml.H(wires[2])
+
+
 def CNOT_synth(A, n, m, c):
     """
     Performs the CNOT circuit synthesis using the efficient approach in
@@ -221,7 +249,7 @@ def CNOT_synth(A, n, m, c):
 
     # convert to pennylane circuit
     for j in range(len(circuit)):
-        qml.MultiControlledX(wires=(c, circuit[j][0] + INPUT_QUBITS, circuit[j][1] + INPUT_QUBITS),)
+        compileMultiControlledX(wires=(c, circuit[j][0] + INPUT_QUBITS, circuit[j][1] + INPUT_QUBITS),)
 
 
 def hash_pattern(arr, precision=10):

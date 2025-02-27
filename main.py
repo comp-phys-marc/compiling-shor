@@ -147,10 +147,9 @@ def get_matrix_l_mod_N(l, N):
     :param N: the modulus being factored.
     :return: The matrix U_{N,l}.
     """
-    num_qubits = 3
     i = 0
     unitaries = []
-    while i < 2*num_qubits - 1:
+    while i < 2*OUTPUT_QUBITS - 1:
         unitary = get_controlled_modular_multiplication_unitary(l, N, i)
         unitaries.append(unitary)
         i += 1
@@ -181,6 +180,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
 
         # row = np.linalg.lstsq(np.array(a), np.array(b))[0]
 
+        # solve linear system with binary variables
         for m, n, o, p, q in product([1, 0], repeat=OUTPUT_QUBITS):
             row = [m, n, o, p, q]
             row_works = True

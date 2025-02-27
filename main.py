@@ -204,21 +204,21 @@ def compileMultiControlledX(wires):
     :param wires: The wires the gate acts on, with the target wire last.
     :return:
     """
-    qml.T(wires[0])
-    qml.CNOT(wires[0], wires[1])
-    qml.adjoint(qml.T(wires[1]))
-    qml.CNOT(wires[0], wires[1])
-    qml.T(wires[1])
-    qml.H(wires[2])
-    qml.CNOT(wires[1], wires[2])
-    qml.adjoint(qml.T(wires[2]))
-    qml.CNOT(wires[0], wires[2])
-    qml.T(wires[2])
-    qml.CNOT(wires[1], wires[2])
-    qml.adjoint(qml.T(wires[2]))
-    qml.CNOT(wires[0], wires[2])
-    qml.T(wires[2])
-    qml.H(wires[2])
+    qml.T(wires=wires[0])
+    qml.CNOT(wires=(wires[0], wires[1]))
+    qml.adjoint(qml.T(wires=wires[1]))
+    qml.CNOT(wires=(wires[0], wires[1]))
+    qml.T(wires=wires[1])
+    qml.H(wires=wires[2])
+    qml.CNOT(wires=(wires[1], wires[2]))
+    qml.adjoint(qml.T(wires=wires[2]))
+    qml.CNOT(wires=(wires[0], wires[2]))
+    qml.T(wires=wires[2])
+    qml.CNOT(wires=(wires[1], wires[2]))
+    qml.adjoint(qml.T(wires=wires[2]))
+    qml.CNOT(wires=(wires[0], wires[2]))
+    qml.T(wires=wires[2])
+    qml.H(wires=wires[2])
 
 
 def CNOT_synth(A, n, m, c):
@@ -249,6 +249,7 @@ def CNOT_synth(A, n, m, c):
 
     # convert to pennylane circuit
     for j in range(len(circuit)):
+        #qml.MultiControlledX(wires=(c, circuit[j][0] + INPUT_QUBITS, circuit[j][1] + INPUT_QUBITS),)
         compileMultiControlledX(wires=(c, circuit[j][0] + INPUT_QUBITS, circuit[j][1] + INPUT_QUBITS),)
 
 

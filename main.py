@@ -5,6 +5,7 @@ Compiling Shor's Algorithm.
 @Date: 2025-02-20
 '''
 
+import sys
 import random
 import numpy as np
 import pennylane as qml
@@ -567,6 +568,7 @@ def get_period(U, e):
     # qml.clifford_t_decomposition(shor_circuit(U), e)
 
     # draw circuit with QFT expanded
+    sys.setrecursionlimit(15000)
     print(qml.draw(shor_circuit)(U))
 
     # draw circuit with matplotlib

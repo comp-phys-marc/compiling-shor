@@ -20,6 +20,7 @@ plt.style.use('pennylane.drawer.plot')
 INPUT_QUBITS = 10
 OUTPUT_QUBITS = 5
 ANCILLA_QUBITS = 5
+CARRY_QUBITS = 2
 
 
 # Part 1. Helper functions
@@ -154,6 +155,74 @@ def get_matrix_l_mod_N(l, N):
     return unitaries
 
 
+def build_adder_circuit(a, c):
+    """
+    Builds a circuit to do modular multiplication via shifted additions.
+    :param a: The pre-calculated l**(2**i).
+    :param c: The controlling qubit.
+    :return:
+    """
+    n = OUTPUT_QUBITS
+    shift = 0  # not the i in the docstring... this one indexes a's bits
+
+    # load b into ancilla register
+    for j in range(OUTPUT_QUBITS):
+        compileMultiControlledX((c, INPUT_QUBITS + j, INPUT_QUBITS + OUTPUT_QUBITS + j))
+
+    assert build_adder_circuit_helper(format(int(a), '#07b').split('b')[1][::-1], n, shift, c)
+
+    # reset ancilla register... reseting in this way with pennylane is ok because it just provisions more fresh qubits
+    # see https://discuss.pennylane.ai/t/mid-circuit-reset-usage/3403.
+    for k in range(ANCILLA_QUBITS):
+        qml.measure(INPUT_QUBITS + OUTPUT_QUBITS + k, reset=True)
+
+def build_adder_circuit_helper(a, n, shift, c):
+    """
+    Recursive function that builds the modular multiplication circuit with shifted additions.
+    :param a: The pre-calculated l**(2**j) as a big endian binary string.
+    :param n: The size of the registers.
+    :param i: The current index (from least to most significant digits).
+    :param c: The controlling qubit.
+    :return: whether finished.
+    """
+    if shift == n:
+        return True
+    elif shift == 0:
+        if bool(a[shift]) is False:
+            # reset output register
+            for j in range(OUTPUT_QUBITS):
+                qml.measure(INPUT_QUBITS + j, reset=True)
+        return build_adder_circuit_helper(a, n, shift + 1, c)
+    else:
+        if bool(a[shift]) is True:
+
+            # add shifted b to the output register
+            carry_qubit = INPUT_QUBITS + OUTPUT_QUBITS + ANCILLA_QUBITS + 0
+            output_qubit = INPUT_QUBITS + 0 + shift
+            ancilla_qubit = INPUT_QUBITS + OUTPUT_QUBITS + 0
+
+            MAJ((carry_qubit, output_qubit, ancilla_qubit), c)
+
+            for _ in range(1 + shift, OUTPUT_QUBITS):
+                carry_qubit = ancilla_qubit
+                output_qubit = output_qubit + 1
+                ancilla_qubit = ancilla_qubit + 1
+
+                MAJ((carry_qubit, output_qubit, ancilla_qubit), c)
+
+            carry_output_qubit = INPUT_QUBITS + OUTPUT_QUBITS + ANCILLA_QUBITS + 1
+            compileMultiControlledX((c, ancilla_qubit, carry_output_qubit))
+
+            UMA((carry_qubit, output_qubit, ancilla_qubit), c)
+
+            for _ in range(OUTPUT_QUBITS - 1, shift, -1):
+                ancilla_qubit = carry_qubit
+                output_qubit = output_qubit - 1
+                carry_qubit = carry_qubit - 1
+                UMA((carry_qubit, output_qubit, ancilla_qubit), c)
+        return build_adder_circuit_helper(a, n, shift + 1, c)
+
+
 def get_controlled_modular_multiplication_unitary(l, N, i):
     """
     Returns an in-place controlled modular multiplication unitary for power i.
@@ -163,14 +232,16 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
     :return: a partially initialized function to generate the modular multiplication circuit.
     """
 
+    solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
+
     try:
         truth_table = {}
 
         for x in range(2**OUTPUT_QUBITS):
-            truth_table[format(x, '#07b').split('b')[1]] = format((x*(l**(2**i)) % N), '#07b').split('b')[1]
+            truth_table[format(x, '#07b').split('b')[1][::-1]] = (
+                format((x*(l**(2**i)) % N), '#07b').split('b')[1][::-1])
 
         U = []
-        solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
 
         for op_index, op_row in enumerate(range(OUTPUT_QUBITS)):
             b = []
@@ -199,7 +270,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
 
             U.append(row)
 
-        if not np.all(soln_exists):
+        if not np.all(solns_exist):
             raise Exception("No in-place solution exists.")
 
         return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
@@ -207,20 +278,21 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
     except Exception as e:
 
         # if no in-place solution exists...
-        if not np.all(soln_exists):
+        if not np.all(solns_exist):
             # define out-of-place multipliers using ancillas...
 
             # forward operation
             truth_table = {}
 
             for x in range(2 ** OUTPUT_QUBITS):
-                truth_table[format(x, '#07b').split('b')[1] + ''.join(['0' for _ in range(ANCILLA_QUBITS)])] = (
-                    format(x, '#07b').split('b')[1] + format((x * (l ** (2 ** i)) % N), '#07b').split('b'))[1]
+                truth_table[(format(x, '#07b').split('b')[1][::-1] + ''.join(['0' for _ in range(ANCILLA_QUBITS)]))] = (
+                    format(x, '#07b').split('b')[1][::-1] + format((x*(l**(2**i))%N), '#07b').split('b')[1][::-1])
 
             U = []
-            solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
+            U_fallback = False
+            solns_exist = np.array([False for _ in range(OUTPUT_QUBITS + ANCILLA_QUBITS)])
 
-            for op_index, op_row in enumerate(range(OUTPUT_QUBITS)):
+            for op_index, op_row in enumerate(range(OUTPUT_QUBITS + ANCILLA_QUBITS)):
                 b = []
                 a = []
                 for input in truth_table.keys():
@@ -247,20 +319,22 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
 
                 U.append(row)
 
-            if not np.all(soln_exists):
-                raise Exception("No out-of-place solution exists.")
+            if not np.all(solns_exist):
+                # we will fall back on the ripple carry adder solution
+                U_fallback = True
 
             # inverse operation
             truth_table = {}
 
             for x in range(2 ** OUTPUT_QUBITS):
-                truth_table[format(x, '#07b').split('b')[1] + ''.join(['0' for _ in range(ANCILLA_QUBITS)])] = (
-                        format(x, '#07b').split('b')[1] + format((x * ((l ** (2 ** i)) ** -1) % N), '#07b').split('b'))[1]
+                truth_table[format(x, '#07b').split('b')[1][::-1] + ''.join(['0' for _ in range(ANCILLA_QUBITS)])] = (
+                        format(x, '#07b').split('b')[1][::-1] + format(int(x*((l**(2**i))**-1)%N), '#07b').split('b')[1][::-1])
 
             V = []
-            solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
+            V_fallback = False
+            solns_exist = np.array([False for _ in range(OUTPUT_QUBITS + ANCILLA_QUBITS)])
 
-            for op_index, op_row in enumerate(range(OUTPUT_QUBITS)):
+            for op_index, op_row in enumerate(range(OUTPUT_QUBITS + ANCILLA_QUBITS)):
                 b = []
                 a = []
                 for input in truth_table.keys():
@@ -287,10 +361,18 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
 
                 V.append(row)
 
+            if not np.all(solns_exist):
+                V_fallback = True
+
             def in_place_modular_exponentiation_via_ancillas(c):
 
                 # apply out-of-place modular multiplication
-                partial(CNOT_synth, A=np.array(U), n=len(row), m=2)(c=c)
+                if not U_fallback:
+                    # we automatically solved for and synthesize an operation
+                    partial(CNOT_synth, A=np.array(U), n=len(row), m=2)(c=c)
+                else:
+                    # otherwise, we use the known ripple carry solution
+                    partial(build_adder_circuit, a=(l**(2**i)))(c=c)
 
                 # swap registers
                 for s in range(OUTPUT_QUBITS):
@@ -302,12 +384,52 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
                     compileMultiControlledX(wires=(c, INPUT_QUBITS + s, OUTPUT_QUBITS + INPUT_QUBITS + s,))
 
                 # perform inverse out-of-place multiplication
-                partial(CNOT_synth, A=np.array(V), n=len(row), m=2)(c=c)
+                if not V_fallback:
+                    # we automatically solved for and synthesize an operation
+                    partial(CNOT_synth, A=np.array(V), n=len(row), m=2)(c=c)
+                else:
+                    # otherwise, we use the known ripple carry solution
+                    partial(build_adder_circuit, a=(l**(2**i))**-1)(c=c)
 
             return in_place_modular_exponentiation_via_ancillas
 
         else:
             print(f"Cannot handle unknown exception: {e}")
+
+
+def MAJ(wires, c):
+    """
+    The majority gate used in the construction of the ripple carry adder:
+
+    [1] S. A. Cuccaro, T. G. Draper, S. A. Kutin, and D. P. Moulton, “A
+    new quantum ripple-carry addition circuit,” Oct. 22, 2004, arXiv:
+    arXiv:quant-ph/0410184. doi: 10.48550/arXiv.quant-ph/0410184.
+
+    :param wires: The wires to which the gates apply.
+    :param c: The controlling input qubit.
+    :return:
+    """
+    compileMultiControlledX((c, wires[2], wires[1]))
+    compileMultiControlledX((c, wires[2], wires[0]))
+    compileMultiControlledX((c, *wires))
+
+
+def UMA(wires, c):
+    """
+    The unmajority and add gate used in the construction of the ripple carry adder:
+
+    [1] S. A. Cuccaro, T. G. Draper, S. A. Kutin, and D. P. Moulton, “A
+    new quantum ripple-carry addition circuit,” Oct. 22, 2004, arXiv:
+    arXiv:quant-ph/0410184. doi: 10.48550/arXiv.quant-ph/0410184.
+
+    :param wires: The wires to which the gates apply.
+    :param c: The controlling input qubit.
+    :return:
+    """
+    compileMultiControlledX((c, *wires))
+    compileMultiControlledX((c, wires[2], wires[0]))
+    compileMultiControlledX((c, wires[0], wires[1]))
+
 
 def compileMultiControlledX(wires):
     """
@@ -432,7 +554,7 @@ def lwr_CNOT_synth(A, n, m):
         return [A, circuit]
 
 
-shor_machine = qml.device('default.qubit', wires=INPUT_QUBITS+OUTPUT_QUBITS+ANCILLA_QUBITS, shots=None)
+shor_machine = qml.device('default.qubit', wires=INPUT_QUBITS+OUTPUT_QUBITS+ANCILLA_QUBITS+CARRY_QUBITS, shots=None)
 
 
 def get_period(U, e):

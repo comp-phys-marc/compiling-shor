@@ -19,6 +19,7 @@ plt.style.use('pennylane.drawer.plot')
 
 INPUT_QUBITS = 10
 OUTPUT_QUBITS = 5
+ANCILLA_QUBITS = 5
 
 
 # Part 1. Helper functions
@@ -161,37 +162,152 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
     :param i: The power of l.
     :return: a partially initialized function to generate the modular multiplication circuit.
     """
-    truth_table = {}
 
-    for x in range(2**OUTPUT_QUBITS):
-        truth_table[format(x, '#07b').split('b')[1]] = format((x*(l**(2**i)) % N), '#07b').split('b')[1]
+    try:
+        truth_table = {}
 
-    U = []
+        for x in range(2**OUTPUT_QUBITS):
+            truth_table[format(x, '#07b').split('b')[1]] = format((x*(l**(2**i)) % N), '#07b').split('b')[1]
 
-    for op_row in range(OUTPUT_QUBITS):
-        b = []
-        a = []
-        for input in truth_table.keys():
-            b.append(int(truth_table[input][op_row]))
-            a.append([int(input[input_entry]) for input_entry in range(OUTPUT_QUBITS)])
+        U = []
+        solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
 
-        # row = np.linalg.lstsq(np.array(a), np.array(b))[0]
+        for op_index, op_row in enumerate(range(OUTPUT_QUBITS)):
+            b = []
+            a = []
+            for input in truth_table.keys():
+                b.append(int(truth_table[input][op_row]))
+                a.append([int(input[input_entry]) for input_entry in range(OUTPUT_QUBITS)])
 
-        # solve linear system with binary variables
-        for m, n, o, p, q in product([1, 0], repeat=OUTPUT_QUBITS):
-            row = [m, n, o, p, q]
-            row_works = True
-            for index, input in enumerate(a):
-                if np.array(row) @ np.array(input).transpose() != b[index]:
-                    row_works = False
+            # row = np.linalg.lstsq(np.array(a), np.array(b))[0]
+
+            soln_exists = False
+
+            # solve linear system with binary variables
+            for m, n, o, p, q in product([1, 0], repeat=OUTPUT_QUBITS):
+                row = [m, n, o, p, q]
+                row_works = True
+                for index, input in enumerate(a):
+                    if np.array(row) @ np.array(input).transpose() != b[index]:
+                        row_works = False
+                        break
+                if row_works:
+                    soln_exists = True
                     break
-            if row_works:
-                break
 
-        U.append(row)
+            solns_exist[op_index] = soln_exists
 
-    return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
+            U.append(row)
 
+        if not np.all(soln_exists):
+            raise Exception("No in-place solution exists.")
+
+        return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
+
+    except Exception as e:
+
+        # if no in-place solution exists...
+        if not np.all(soln_exists):
+            # define out-of-place multipliers using ancillas...
+
+            # forward operation
+            truth_table = {}
+
+            for x in range(2 ** OUTPUT_QUBITS):
+                truth_table[format(x, '#07b').split('b')[1] + ''.join(['0' for _ in range(ANCILLA_QUBITS)])] = (
+                    format(x, '#07b').split('b')[1] + format((x * (l ** (2 ** i)) % N), '#07b').split('b'))[1]
+
+            U = []
+            solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
+
+            for op_index, op_row in enumerate(range(OUTPUT_QUBITS)):
+                b = []
+                a = []
+                for input in truth_table.keys():
+                    b.append(int(truth_table[input][op_row]))
+                    a.append([int(input[input_entry]) for input_entry in range(OUTPUT_QUBITS+ANCILLA_QUBITS)])
+
+                # row = np.linalg.lstsq(np.array(a), np.array(b))[0]
+
+                soln_exists = False
+
+                # solve linear system with binary variables
+                for m, n, o, p, q, r, s, t, u, v in product([1, 0], repeat=OUTPUT_QUBITS+ANCILLA_QUBITS):
+                    row = [m, n, o, p, q, r, s, t, u, v]
+                    row_works = True
+                    for index, input in enumerate(a):
+                        if np.array(row) @ np.array(input).transpose() != b[index]:
+                            row_works = False
+                            break
+                    if row_works:
+                        soln_exists = True
+                        break
+
+                solns_exist[op_index] = soln_exists
+
+                U.append(row)
+
+            if not np.all(soln_exists):
+                raise Exception("No out-of-place solution exists.")
+
+            # inverse operation
+            truth_table = {}
+
+            for x in range(2 ** OUTPUT_QUBITS):
+                truth_table[format(x, '#07b').split('b')[1] + ''.join(['0' for _ in range(ANCILLA_QUBITS)])] = (
+                        format(x, '#07b').split('b')[1] + format((x * ((l ** (2 ** i)) ** -1) % N), '#07b').split('b'))[1]
+
+            V = []
+            solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
+
+            for op_index, op_row in enumerate(range(OUTPUT_QUBITS)):
+                b = []
+                a = []
+                for input in truth_table.keys():
+                    b.append(int(truth_table[input][op_row]))
+                    a.append([int(input[input_entry]) for input_entry in range(OUTPUT_QUBITS + ANCILLA_QUBITS)])
+
+                # row = np.linalg.lstsq(np.array(a), np.array(b))[0]
+
+                soln_exists = False
+
+                # solve linear system with binary variables
+                for m, n, o, p, q, r, s, t, u, v in product([1, 0], repeat=OUTPUT_QUBITS + ANCILLA_QUBITS):
+                    row = [m, n, o, p, q, r, s, t, u, v]
+                    row_works = True
+                    for index, input in enumerate(a):
+                        if np.array(row) @ np.array(input).transpose() != b[index]:
+                            row_works = False
+                            break
+                    if row_works:
+                        soln_exists = True
+                        break
+
+                solns_exist[op_index] = soln_exists
+
+                V.append(row)
+
+            def in_place_modular_exponentiation_via_ancillas(c):
+
+                # apply out-of-place modular multiplication
+                partial(CNOT_synth, A=np.array(U), n=len(row), m=2)(c=c)
+
+                # swap registers
+                for s in range(OUTPUT_QUBITS):
+                    # qml.SWAP((INPUT_QUBITS+s, OUTPUT_QUBITS+INPUT_QUBITS+s))
+
+                    # CNOT based SWAPs used to enable control by input register
+                    compileMultiControlledX(wires=(c, INPUT_QUBITS + s, OUTPUT_QUBITS + INPUT_QUBITS + s,))
+                    compileMultiControlledX(wires=(c, OUTPUT_QUBITS + INPUT_QUBITS + s, INPUT_QUBITS + s,))
+                    compileMultiControlledX(wires=(c, INPUT_QUBITS + s, OUTPUT_QUBITS + INPUT_QUBITS + s,))
+
+                # perform inverse out-of-place multiplication
+                partial(CNOT_synth, A=np.array(V), n=len(row), m=2)(c=c)
+
+            return in_place_modular_exponentiation_via_ancillas
+
+        else:
+            print(f"Cannot handle unknown exception: {e}")
 
 def compileMultiControlledX(wires):
     """
@@ -316,7 +432,7 @@ def lwr_CNOT_synth(A, n, m):
         return [A, circuit]
 
 
-shor_machine = qml.device('default.qubit', wires=INPUT_QUBITS+OUTPUT_QUBITS, shots=None)
+shor_machine = qml.device('default.qubit', wires=INPUT_QUBITS+OUTPUT_QUBITS+ANCILLA_QUBITS, shots=None)
 
 
 def get_period(U, e):

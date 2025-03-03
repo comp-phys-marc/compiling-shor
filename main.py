@@ -171,10 +171,6 @@ def build_adder_circuit(a, c):
 
     assert build_adder_circuit_helper(format(int(a), '#07b').split('b')[1][::-1], n, shift, c)
 
-    # reset ancilla register... reseting in this way with pennylane is ok because it just provisions more fresh qubits
-    # see https://discuss.pennylane.ai/t/mid-circuit-reset-usage/3403.
-    for k in range(ANCILLA_QUBITS):
-        qml.measure(INPUT_QUBITS + OUTPUT_QUBITS + k, reset=True)
 
 def build_adder_circuit_helper(a, n, shift, c):
     """

@@ -439,6 +439,9 @@ def compileMultiControlledX(wires):
     :param wires: The wires the gate acts on, with the target wire last.
     :return:
     """
+    # use this line to generate uncompiled circuit for easy inspection
+    # qml.MultiControlledX(wires=wires)
+
     qml.T(wires=wires[0])
     qml.CNOT(wires=(wires[0], wires[1]))
     qml.adjoint(qml.T(wires=wires[1]))

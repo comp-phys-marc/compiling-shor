@@ -184,23 +184,19 @@ def build_adder_circuit_helper(a, n, shift, c):
     """
     if shift == n:
         return True
-    elif shift == 0:
-        if bool(a[shift]) is False:
-            # reset output register
-            for j in range(OUTPUT_QUBITS):
-                qml.measure(INPUT_QUBITS + j, reset=True)
-        return build_adder_circuit_helper(a, n, shift + 1, c)
     else:
         if bool(a[shift]) is True:
-
             # add shifted b to the output register
             carry_qubit = INPUT_QUBITS + OUTPUT_QUBITS + ANCILLA_QUBITS + 0
-            output_qubit = INPUT_QUBITS + 0 + shift
-            ancilla_qubit = INPUT_QUBITS + OUTPUT_QUBITS + 0
+
+            # note these variables are named based on the roles of the inputs to the MAJ and UMA
+            output_qubit = INPUT_QUBITS + OUTPUT_QUBITS + 0 + shift
+            ancilla_qubit = INPUT_QUBITS + 0
 
             MAJ((carry_qubit, output_qubit, ancilla_qubit), c)
 
             for _ in range(1 + shift, OUTPUT_QUBITS):
+                carry_qubit = ancilla_qubit
                 carry_qubit = ancilla_qubit
                 output_qubit = output_qubit + 1
                 ancilla_qubit = ancilla_qubit + 1
@@ -212,11 +208,20 @@ def build_adder_circuit_helper(a, n, shift, c):
 
             UMA((carry_qubit, output_qubit, ancilla_qubit), c)
 
-            for _ in range(OUTPUT_QUBITS - 1, shift, -1):
+            for _ in range(OUTPUT_QUBITS - 2, shift, -1):
                 ancilla_qubit = carry_qubit
                 output_qubit = output_qubit - 1
                 carry_qubit = carry_qubit - 1
                 UMA((carry_qubit, output_qubit, ancilla_qubit), c)
+
+            if carry_qubit != INPUT_QUBITS + OUTPUT_QUBITS + ANCILLA_QUBITS + 0:
+
+                ancilla_qubit = carry_qubit
+                output_qubit = output_qubit - 1
+                carry_qubit = INPUT_QUBITS + OUTPUT_QUBITS + ANCILLA_QUBITS + 0
+
+                UMA((carry_qubit, output_qubit, ancilla_qubit), c)
+
         return build_adder_circuit_helper(a, n, shift + 1, c)
 
 
@@ -383,10 +388,14 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
                 # perform inverse out-of-place multiplication
                 if not V_fallback:
                     # we automatically solved for and synthesize an operation
-                    partial(CNOT_synth, A=np.array(V), n=len(row), m=2)(c=c)
+                    def to_adjoint():
+                        partial(CNOT_synth, A=np.array(V), n=len(row), m=2)(c=c)
+                    qml.adjoint(to_adjoint)
                 else:
                     # otherwise, we use the known ripple carry solution
-                    partial(build_adder_circuit, a=(l**(2**i))**-1)(c=c)
+                    def to_adjoint():
+                        partial(build_adder_circuit, a=(l**(2**i))**-1)(c=c)
+                    qml.adjoint(to_adjoint)
 
             return in_place_modular_exponentiation_via_ancillas
 

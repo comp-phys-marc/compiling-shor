@@ -225,6 +225,16 @@ def build_adder_circuit_helper(a, n, shift, c):
         return build_adder_circuit_helper(a, n, shift + 1, c)
 
 
+def is_non_singular(x):
+    """
+    Computes whether a matrix is singular and invertible.
+    :param x: The matrix.
+    :return: Whether it is singular.
+    """
+    non_singular = np.linalg.cond(x) < 1 / sys.float_info.epsilon
+    return non_singular
+
+
 def get_controlled_modular_multiplication_unitary(l, N, i):
     """
     Returns an in-place controlled modular multiplication unitary for power i.
@@ -235,6 +245,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
     """
 
     solns_exist = np.array([False for _ in range(OUTPUT_QUBITS)])
+    U = []
 
     try:
         truth_table = {}
@@ -242,8 +253,6 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
         for x in range(2**OUTPUT_QUBITS):
             truth_table[format(x, '#07b').split('b')[1][::-1]] = (
                 format((x*(l**(2**i)) % N), '#07b').split('b')[1][::-1])
-
-        U = []
 
         for op_index, op_row in enumerate(range(OUTPUT_QUBITS)):
             b = []
@@ -261,7 +270,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
                 row = [m, n, o, p, q]
                 row_works = True
                 for index, input in enumerate(a):
-                    if np.array(row) @ np.array(input).transpose() != b[index]:
+                    if np.array(row) @ np.array(input).transpose() != b[index] or row in U or np.all(np.array(row) == 0):
                         row_works = False
                         break
                 if row_works:
@@ -272,7 +281,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
 
             U.append(row)
 
-        if not np.all(solns_exist):
+        if not np.all(solns_exist) or not is_non_singular(U):
             raise Exception("No in-place solution exists.")
 
         return partial(CNOT_synth, A=np.array(U), n=len(row), m=2)
@@ -280,7 +289,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
     except Exception as e:
 
         # if no in-place solution exists...
-        if not np.all(solns_exist):
+        if not np.all(solns_exist) or not is_non_singular(U):
             # define out-of-place multipliers using ancillas...
 
             # forward operation
@@ -310,7 +319,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
                     row = [m, n, o, p, q, r, s, t, u, v]
                     row_works = True
                     for index, input in enumerate(a):
-                        if np.array(row) @ np.array(input).transpose() != b[index]:
+                        if np.array(row) @ np.array(input).transpose() != b[index] or row in U or np.all(np.array(row) == 0):
                             row_works = False
                             break
                     if row_works:
@@ -321,7 +330,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
 
                 U.append(row)
 
-            if not np.all(solns_exist):
+            if not np.all(solns_exist) or not is_non_singular(U):
                 # we will fall back on the ripple carry adder solution
                 U_fallback = True
 
@@ -352,7 +361,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
                     row = [m, n, o, p, q, r, s, t, u, v]
                     row_works = True
                     for index, input in enumerate(a):
-                        if np.array(row) @ np.array(input).transpose() != b[index]:
+                        if np.array(row) @ np.array(input).transpose() != b[index] or row in U or np.all(np.array(row) == 0):
                             row_works = False
                             break
                     if row_works:
@@ -363,7 +372,7 @@ def get_controlled_modular_multiplication_unitary(l, N, i):
 
                 V.append(row)
 
-            if not np.all(solns_exist):
+            if not np.all(solns_exist) or not is_non_singular(V):
                 V_fallback = True
 
             def in_place_modular_exponentiation_via_ancillas(c):
@@ -437,7 +446,7 @@ def UMA(wires, c):
     compileMultiControlledX((c, wires[0], wires[1]))
 
 
-def compileMultiControlledX(wires):
+def compileMultiControlledX(wires, debug=False):
     """
     Compile a Toffoli to Clifford+T using the approach in:
 
@@ -446,26 +455,30 @@ def compileMultiControlledX(wires):
     vol. 16, Dec. 2014, doi: 10.26421/QIC16.1-2-6.
 
     :param wires: The wires the gate acts on, with the target wire last.
+    :param debug: Whether to skip tghe compilation to Clifford + T for debugging.
     :return:
     """
-    # use this line to generate uncompiled circuit for easy inspection
-    # qml.MultiControlledX(wires=wires)
 
-    qml.T(wires=wires[0])
-    qml.CNOT(wires=(wires[0], wires[1]))
-    qml.adjoint(qml.T(wires=wires[1]))
-    qml.CNOT(wires=(wires[0], wires[1]))
-    qml.T(wires=wires[1])
-    qml.H(wires=wires[2])
-    qml.CNOT(wires=(wires[1], wires[2]))
-    qml.adjoint(qml.T(wires=wires[2]))
-    qml.CNOT(wires=(wires[0], wires[2]))
-    qml.T(wires=wires[2])
-    qml.CNOT(wires=(wires[1], wires[2]))
-    qml.adjoint(qml.T(wires=wires[2]))
-    qml.CNOT(wires=(wires[0], wires[2]))
-    qml.T(wires=wires[2])
-    qml.H(wires=wires[2])
+    if debug:
+        # use this line to generate uncompiled circuit for easy inspection
+        qml.MultiControlledX(wires=wires)
+
+    else:
+        qml.T(wires=wires[0])
+        qml.CNOT(wires=(wires[0], wires[1]))
+        qml.adjoint(qml.T(wires=wires[1]))
+        qml.CNOT(wires=(wires[0], wires[1]))
+        qml.T(wires=wires[1])
+        qml.H(wires=wires[2])
+        qml.CNOT(wires=(wires[1], wires[2]))
+        qml.adjoint(qml.T(wires=wires[2]))
+        qml.CNOT(wires=(wires[0], wires[2]))
+        qml.T(wires=wires[2])
+        qml.CNOT(wires=(wires[1], wires[2]))
+        qml.adjoint(qml.T(wires=wires[2]))
+        qml.CNOT(wires=(wires[0], wires[2]))
+        qml.T(wires=wires[2])
+        qml.H(wires=wires[2])
 
 
 def CNOT_synth(A, n, m, c):
@@ -633,5 +646,6 @@ def shor_circuit(U):
 
 
 if __name__ == '__main__':
+    # solve the assigned problem
     [p, q] = shor(32, 3, 10**-7)
     print(f"p: {p}, q: {q}")

@@ -1,8 +1,8 @@
 # Implementation
 
 This was not my first exposure to Shor’s algorithm. However, there were
-certainly components of this task which were firsts for me, such as implement-
-ing general modular exponentiation circuits, compiling to Clifford + T, and
+certainly components of this task which were firsts for me, such as implementing 
+general modular exponentiation circuits, compiling to Clifford + T, and
 implementing phase estimation for more than three qubits.
 
 In order to approach these tasks, I did some preliminary research. This

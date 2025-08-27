@@ -6,8 +6,8 @@ general modular exponentiation circuits, compiling to Clifford + T, and
 implementing phase estimation for more than three qubits.
 
 In order to approach these tasks, I did some preliminary research. This
-led me to find the paper [GJ13] which gives some examples of modular expo-
-nentiation circuits for use in Shor’s algorithm. This paper builds these circuit
+led me to find the paper [GJ13] which gives some examples of modular exponentiation 
+circuits for use in Shor’s algorithm. This paper builds these circuit
 straightforwardly from truth tables, for small numbers of qubits. For example,
 for the case where N = 21, we have an input register of three qubits and l = 4,
 the truth table is:
@@ -36,24 +36,24 @@ any particular modular exponentiation circuit.
 
 Some challenges arose as I wrote this part of the implementation. Namely,
 Python’s Numpy can solve linear systems of equations with ‘linalg.solve‘, but
-since the modular exponentiation functions’ truth tables yielded underdeter-
-mined systems, there were an infinite number of solutions and this approach
-was not viable. Neither was ‘linalg.lstsq‘, which returns the least-squares solu-
-tion, viable since even this solution was not possible to constrain to solve for
+since the modular exponentiation functions’ truth tables yielded underdetermined systems, 
+there were an infinite number of solutions and this approach
+was not viable. Neither was ‘linalg.lstsq‘, which returns the least-squares solution, 
+viable since even this solution was not possible to constrain to solve for
 binary values only. Matlab has a function for solving linear systems of binary
 variables, but Python does not.
 
-Therefore, I wrote my own solution for solving for these linear transforma-
-tions. This is inefficient, however the approach should be accurate. Hopefully,
+Therefore, I wrote my own solution for solving for these linear transformations. 
+This is inefficient, however the approach should be accurate. Hopefully,
 using the approach in [PMH03] to then synthesize CNOT circuits from these
-linear transformations efficiently offsets the inefficiency of solving for these trans-
-formations in the first place.
+linear transformations efficiently offsets the inefficiency of solving for these transformations 
+in the first place.
 
 There were several challenges implementing the algorithm for efficient circuit
-synthesis presented in [PMH03]. The pseudocode in the paper uses some lan-
-guage features which are not present in Python. For example, tensors (ranges
-of values representing the patterns found in the sub-rows) are used as array in-
-dices. Tensors in Numpy are unhashable types. Therefore, I had to implement a
+synthesis presented in [PMH03]. The pseudocode in the paper uses some language 
+features which are not present in Python. For example, tensors (ranges
+of values representing the patterns found in the sub-rows) are used as array indices. 
+Tensors in Numpy are unhashable types. Therefore, I had to implement a
 hashing function for these. I chose to convert the individual entries into strings
 up to a certain precision and concatenate them.
 
@@ -82,16 +82,16 @@ of needing to read multiple technical papers to understand this approach in the
 first place.
 
 To address the first of these challenges, Python’s partial function from the
-functools library was used in various places to pre-initialize and re-package func-
-tions which built Pennylane circuits into functions which would take a control-
-ling qubit index as a sole parameter and then implement the entire circuit with
+functools library was used in various places to pre-initialize and re-package functions 
+which built Pennylane circuits into functions which would take a controlling 
+qubit index as a sole parameter and then implement the entire circuit with
 an extra control on each CNOT, Toffoli, X, etc. This was to allow the control
-of the entire modular multiplication unitary by an input qubit line. The chal-
-lenges with keeping track of indices etc. was done by the use of careful naming
+of the entire modular multiplication unitary by an input qubit line. The challenges 
+with keeping track of indices etc. was done by the use of careful naming
 and commenting conventions. In particular, it was important to remember that
 binary values were indexed from least to most significant bit in the Cuccaro
-paper. Therefore, when iterating over binary values, it was sometimes neces-
-sary to reverse them to match what was in the corresponding qubit register. A
+paper. Therefore, when iterating over binary values, it was sometimes necessary 
+to reverse them to match what was in the corresponding qubit register. A
 inal challenge was that the circuit ended up so large that Python’s max allowed
 recursion depth needed to be extended in order to print it.
 
@@ -115,8 +115,7 @@ to Clifford + T.
 # References
 
 [GJ13] Omar Gamel and Daniel F. V. James. Simplified factoring algorithms
-for validating small-scale quantum information processing technolo-
-gies, 2013.
+for validating small-scale quantum information processing technologies, 2013.
 
 [PMH03] K. N. Patel, I. L. Markov, and J. P. Hayes. Efficient Synthesis of
 Linear Reversible Circuits, February 2003. arXiv:quant-ph/0302002.
